@@ -4,7 +4,7 @@ import { uploadBackupToDrive } from '../services/gdrive'
 
 export async function backupRoutes(app: FastifyInstance) {
   app.post('/google-drive', async (_req, reply) => {
-    if (!process.env.GOOGLE_SERVICE_ACCOUNT_JSON || !process.env.GOOGLE_DRIVE_FOLDER_ID) {
+    if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET || !process.env.GOOGLE_REFRESH_TOKEN || !process.env.GOOGLE_DRIVE_FOLDER_ID) {
       return reply.status(503).send({ error: 'Google Drive backup is not configured on this server' })
     }
 

@@ -163,50 +163,59 @@ const headers = signRequest('POST', '/credentials', { siteName: 'GitHub', ... })
 
 ## Google Drive Setup
 
+Uses OAuth2 (not Service Account) — uploads count against your personal Drive quota (15 GB free).
+
 ### 1. Create a GCP project
-1. Go to [console.cloud.google.com](https://console.cloud.google.com)
-2. Click the project dropdown (top bar) → **New Project**
-3. Name it `password-manager` → **Create**
+1. Go to [console.cloud.google.com](https://console.cloud.google.com) — sign in with your personal Google account
+2. Click the project dropdown → **New Project** → name it `password-manager` → **Create**
 
 ### 2. Enable the Drive API
-1. With your project selected, go to **APIs & Services** → **Library**
-2. Search `Google Drive API` → **Enable**
+1. **APIs & Services** → **Library** → search `Google Drive API` → **Enable**
 
-### 3. Create a Service Account
-1. Go to **APIs & Services** → **Credentials** → **Create Credentials** → **Service Account**
-2. Name it `password-manager-backup` → **Create and Continue** → **Done**
-3. Click the service account email → **Keys** tab → **Add Key** → **Create new key** → **JSON** → **Create**
-4. A `.json` file downloads — keep it safe, you won't be able to download it again
+### 3. Configure the OAuth consent screen
+1. **APIs & Services** → **OAuth consent screen**
+2. User Type: **External** → **Create**
+3. Fill in App name (`Password Manager`), your email for support and developer contact → **Save and Continue**
+4. Skip Scopes → **Save and Continue**
+5. Under **Test users** → **Add Users** → add your personal Gmail → **Save and Continue**
 
-### 4. Share a Drive folder with the service account
-1. Open [drive.google.com](https://drive.google.com) in your personal Google account
-2. Create a folder named `password-manager-backups`
-3. Right-click the folder → **Share**
-4. Paste the service account email (looks like `password-manager-backup@your-project.iam.gserviceaccount.com`)
-5. Set role to **Editor** → **Send**
+### 4. Create OAuth2 credentials
+1. **APIs & Services** → **Credentials** → **Create Credentials** → **OAuth client ID**
+2. Application type: **Web application**
+3. Name: `password-manager-server`
+4. Under **Authorised redirect URIs** → **Add URI** → `http://localhost`
+5. **Create** — copy the **Client ID** and **Client Secret**
 
-### 5. Get the folder ID
-Open the folder in Drive — the URL looks like:
+### 5. Add to `.env`
+```env
+GOOGLE_CLIENT_ID="your-client-id.apps.googleusercontent.com"
+GOOGLE_CLIENT_SECRET="your-client-secret"
+```
+
+### 6. Run the one-time auth script
+```bash
+npm run auth:google
+```
+It prints a URL — open it, authorize with your personal Google account, then copy the `code` from the redirect URL (the page won't load, that's expected) and paste it back into the terminal.
+
+It will print your `GOOGLE_REFRESH_TOKEN` — add it to `.env`.
+
+### 7. Create a Drive folder and get its ID
+1. Open [drive.google.com](https://drive.google.com) → create a folder named `password-manager-backups`
+2. Open the folder — copy the ID from the URL:
 ```
 https://drive.google.com/drive/folders/1ABC123XYZ...
-                                        ^^^^^^^^^^^^^^
-                                        This is your GOOGLE_DRIVE_FOLDER_ID
+                                        ^^^^^^^^^^^^^^ GOOGLE_DRIVE_FOLDER_ID
 ```
 
-### 6. Add environment variables
+### 8. Add all four vars to Render
 
-**Local `.env`:**
-```env
-GOOGLE_SERVICE_ACCOUNT_JSON='<paste entire contents of downloaded JSON, as one line>'
-GOOGLE_DRIVE_FOLDER_ID="1ABC123XYZ..."
-```
-
-**Render dashboard** — add the same two keys under Environment Variables.
-
-> Tip: to convert the JSON file to a single line for pasting:
-> ```bash
-> cat your-service-account.json | tr -d '\n'
-> ```
+| Key | Value |
+|-----|-------|
+| `GOOGLE_CLIENT_ID` | From Step 4 |
+| `GOOGLE_CLIENT_SECRET` | From Step 4 |
+| `GOOGLE_REFRESH_TOKEN` | From Step 6 |
+| `GOOGLE_DRIVE_FOLDER_ID` | From Step 7 |
 
 ---
 
@@ -262,7 +271,8 @@ server/
 
 ### Phase 2 — Google Drive Backup
 - `POST /backup/google-drive` endpoint
-- Google Service Account authentication (no OAuth browser flow)
-- Exports all credential records (encrypted payloads) to a timestamped JSON file in a designated Drive folder
+- OAuth2 authentication with stored refresh token (uploads to personal Drive quota, not Service Account)
+- One-time auth script: `npm run auth:google`
+- Exports all credential records to a timestamped JSON file in a configured Drive folder
 - Graceful 503 if Drive env vars are not configured
-- Added `googleapis` dependency
+- Added `googleapis` v172 dependency
