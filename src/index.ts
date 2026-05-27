@@ -3,6 +3,7 @@ import Fastify from 'fastify'
 import rateLimit from '@fastify/rate-limit'
 import authPlugin from './plugins/auth'
 import { credentialRoutes } from './routes/credentials'
+import { backupRoutes } from './routes/backup'
 
 const app = Fastify({
   logger: {
@@ -35,6 +36,7 @@ async function start() {
   app.register(async (protectedScope) => {
     protectedScope.register(authPlugin)
     protectedScope.register(credentialRoutes, { prefix: '/credentials' })
+    protectedScope.register(backupRoutes, { prefix: '/backup' })
   })
 
   const port = parseInt(process.env.PORT ?? '3000', 10)

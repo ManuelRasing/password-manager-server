@@ -108,6 +108,7 @@ Server starts at `http://localhost:3000`.
 | `POST` | `/credentials` | Create a new credential |
 | `PUT` | `/credentials/:id` | Update an existing credential |
 | `DELETE` | `/credentials/:id` | Delete a credential |
+| `POST` | `/backup/google-drive` | Export all credentials to Google Drive |
 
 ### Request body (`POST` / `PUT`)
 
@@ -157,6 +158,55 @@ function signRequest(method: string, path: string, body?: unknown) {
 // Example
 const headers = signRequest('POST', '/credentials', { siteName: 'GitHub', ... })
 ```
+
+---
+
+## Google Drive Setup
+
+### 1. Create a GCP project
+1. Go to [console.cloud.google.com](https://console.cloud.google.com)
+2. Click the project dropdown (top bar) → **New Project**
+3. Name it `password-manager` → **Create**
+
+### 2. Enable the Drive API
+1. With your project selected, go to **APIs & Services** → **Library**
+2. Search `Google Drive API` → **Enable**
+
+### 3. Create a Service Account
+1. Go to **APIs & Services** → **Credentials** → **Create Credentials** → **Service Account**
+2. Name it `password-manager-backup` → **Create and Continue** → **Done**
+3. Click the service account email → **Keys** tab → **Add Key** → **Create new key** → **JSON** → **Create**
+4. A `.json` file downloads — keep it safe, you won't be able to download it again
+
+### 4. Share a Drive folder with the service account
+1. Open [drive.google.com](https://drive.google.com) in your personal Google account
+2. Create a folder named `password-manager-backups`
+3. Right-click the folder → **Share**
+4. Paste the service account email (looks like `password-manager-backup@your-project.iam.gserviceaccount.com`)
+5. Set role to **Editor** → **Send**
+
+### 5. Get the folder ID
+Open the folder in Drive — the URL looks like:
+```
+https://drive.google.com/drive/folders/1ABC123XYZ...
+                                        ^^^^^^^^^^^^^^
+                                        This is your GOOGLE_DRIVE_FOLDER_ID
+```
+
+### 6. Add environment variables
+
+**Local `.env`:**
+```env
+GOOGLE_SERVICE_ACCOUNT_JSON='<paste entire contents of downloaded JSON, as one line>'
+GOOGLE_DRIVE_FOLDER_ID="1ABC123XYZ..."
+```
+
+**Render dashboard** — add the same two keys under Environment Variables.
+
+> Tip: to convert the JSON file to a single line for pasting:
+> ```bash
+> cat your-service-account.json | tr -d '\n'
+> ```
 
 ---
 
@@ -210,7 +260,9 @@ server/
 - Public `/health` endpoint (no auth)
 - Request logging with sensitive field redaction
 
-### Phase 2 — Google Drive Backup _(upcoming)_
+### Phase 2 — Google Drive Backup
 - `POST /backup/google-drive` endpoint
-- Google Service Account integration
-- Encrypted JSON export to a designated Drive folder
+- Google Service Account authentication (no OAuth browser flow)
+- Exports all credential records (encrypted payloads) to a timestamped JSON file in a designated Drive folder
+- Graceful 503 if Drive env vars are not configured
+- Added `googleapis` dependency
