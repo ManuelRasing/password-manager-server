@@ -1,0 +1,18 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Credential {
+  id               String   @id @default(uuid())
+  siteName         String   @db.VarChar(255)
+  usernameHint     String   @default("") @db.VarChar(255)
+  encryptedPayload String   // AES-256-GCM ciphertext, base64-encoded
+  iv               String   @db.VarChar(64) // 96-bit nonce, base64-encoded
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}

@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+*.env.local
+
+# Prisma
+prisma/migrations/
+
+# OS
+.DS_Store
