@@ -11,7 +11,7 @@ function getDriveClient() {
     throw new Error('Missing Google Drive env vars: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN, GOOGLE_DRIVE_FOLDER_ID')
   }
 
-  const oauth2Client = new google.auth.OAuth2(clientId, clientSecret, 'http://localhost')
+  const oauth2Client = new google.auth.OAuth2(clientId, clientSecret, 'http://localhost:8080')
   oauth2Client.setCredentials({ refresh_token: refreshToken })
 
   return { drive: google.drive({ version: 'v3', auth: oauth2Client }), folderId }
