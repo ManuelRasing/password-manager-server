@@ -276,6 +276,9 @@ server/
 - Both endpoints are behind HMAC auth
 - `masterSalt` is the PBKDF2 salt (not secret); `encryptedVaultKey` is `AES-256-GCM(masterKey, vaultKey)` — useless without the master password
 
+### Bug Fix — DELETE 400 Bad Request
+- Removed `format: 'uuid'` from `idParamSchema` in `routes/credentials.ts`; Fastify 5 + ajv-formats was validating the format before the handler could return a 404, and it could also conflict depending on ajv strict-mode config. Non-existent IDs are already handled with a 404 inside the route handler.
+
 ### Phase 2 — Google Drive Backup
 - `POST /backup/google-drive` endpoint
 - OAuth2 authentication with stored refresh token (uploads to personal Drive quota, not Service Account)
