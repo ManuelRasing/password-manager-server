@@ -4,6 +4,7 @@ import rateLimit from '@fastify/rate-limit'
 import authPlugin from './plugins/auth'
 import { credentialRoutes } from './routes/credentials'
 import { backupRoutes } from './routes/backup'
+import { vaultConfigRoutes } from './routes/vault-config'
 
 const app = Fastify({
   logger: {
@@ -37,6 +38,7 @@ async function start() {
     protectedScope.register(authPlugin)
     protectedScope.register(credentialRoutes, { prefix: '/credentials' })
     protectedScope.register(backupRoutes, { prefix: '/backup' })
+    protectedScope.register(vaultConfigRoutes, { prefix: '/vault-config' })
   })
 
   const port = parseInt(process.env.PORT ?? '3000', 10)

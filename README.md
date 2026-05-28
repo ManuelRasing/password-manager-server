@@ -269,6 +269,13 @@ server/
 - Public `/health` endpoint (no auth)
 - Request logging with sensitive field redaction
 
+### Phase 7 — Vault Key Model
+- `VaultConfig` Prisma model added (singleton row, `id = 'vault'`)
+- `GET /vault-config` — returns `{ masterSalt, encryptedVaultKey, vaultKeyIv }` or 404 if not set up
+- `PUT /vault-config` — upserts the vault config; called on first setup and on master-password rotation
+- Both endpoints are behind HMAC auth
+- `masterSalt` is the PBKDF2 salt (not secret); `encryptedVaultKey` is `AES-256-GCM(masterKey, vaultKey)` — useless without the master password
+
 ### Phase 2 — Google Drive Backup
 - `POST /backup/google-drive` endpoint
 - OAuth2 authentication with stored refresh token (uploads to personal Drive quota, not Service Account)

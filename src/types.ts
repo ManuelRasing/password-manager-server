@@ -8,3 +8,9 @@ export interface CredentialBody {
 export interface CredentialParams {
   id: string
 }
+
+export interface VaultConfigBody {
+  masterSalt: string
+  encryptedVaultKey: string
+  vaultKeyIv: string
+}

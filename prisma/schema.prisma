@@ -16,3 +16,15 @@ model Credential {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 }
+
+// Singleton row (id = 'vault') — stores the wrapped vault key.
+// masterSalt + encryptedVaultKey + vaultKeyIv are all safe to store
+// server-side: the vault key is useless without the master password.
+model VaultConfig {
+  id                String   @id // always 'vault'
+  masterSalt        String   // PBKDF2 salt, base64 (not secret)
+  encryptedVaultKey String   // AES-256-GCM(masterKey, vaultKey), base64
+  vaultKeyIv        String   // GCM nonce for the above, base64
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+}
