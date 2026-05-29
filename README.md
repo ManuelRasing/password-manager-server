@@ -276,6 +276,12 @@ server/
 - Both endpoints are behind HMAC auth
 - `masterSalt` is the PBKDF2 salt (not secret); `encryptedVaultKey` is `AES-256-GCM(masterKey, vaultKey)` — useless without the master password
 
+### Phase 9 — Notes + URL Fields
+- `Credential` schema: added `url String? @db.VarChar(2048)` (plaintext, nullable)
+- All credential routes updated: `url` included in body schema, select projections, create/update data
+- Backup export includes `url` field
+- `encryptedPayload` now stores `AES-256-GCM(JSON { password, notes? })` — server stores it opaquely (no server-side change to ciphertext handling)
+
 ### Bug Fix — DELETE 400 Bad Request
 - Removed `format: 'uuid'` from `idParamSchema` in `routes/credentials.ts`; Fastify 5 + ajv-formats was validating the format before the handler could return a 404, and it could also conflict depending on ajv strict-mode config. Non-existent IDs are already handled with a 404 inside the route handler.
 

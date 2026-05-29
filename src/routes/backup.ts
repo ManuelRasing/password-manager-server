@@ -14,6 +14,7 @@ export async function backupRoutes(app: FastifyInstance) {
         id: true,
         siteName: true,
         usernameHint: true,
+        url: true,
         encryptedPayload: true,
         iv: true,
         createdAt: true,

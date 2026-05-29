@@ -1,6 +1,7 @@
 export interface CredentialBody {
   siteName: string
   usernameHint?: string
+  url?: string
   encryptedPayload: string
   iv: string
 }

@@ -8,6 +8,7 @@ const bodySchema = {
   properties: {
     siteName:         { type: 'string', minLength: 1, maxLength: 255 },
     usernameHint:     { type: 'string', maxLength: 255 },
+    url:              { type: 'string', maxLength: 2048 },
     encryptedPayload: { type: 'string', minLength: 1 },
     iv:               { type: 'string', minLength: 1, maxLength: 64 }
   },
@@ -30,6 +31,7 @@ export async function credentialRoutes(app: FastifyInstance) {
         id: true,
         siteName: true,
         usernameHint: true,
+        url: true,
         encryptedPayload: true,
         iv: true,
         createdAt: true,
@@ -42,9 +44,9 @@ export async function credentialRoutes(app: FastifyInstance) {
   app.post<{ Body: CredentialBody }>('/', {
     schema: { body: bodySchema }
   }, async (req, reply) => {
-    const { siteName, usernameHint = '', encryptedPayload, iv } = req.body
+    const { siteName, usernameHint = '', url, encryptedPayload, iv } = req.body
     const credential = await prisma.credential.create({
-      data: { siteName, usernameHint, encryptedPayload, iv }
+      data: { siteName, usernameHint, url, encryptedPayload, iv }
     })
     return reply.status(201).send(credential)
   })
@@ -53,14 +55,14 @@ export async function credentialRoutes(app: FastifyInstance) {
     schema: { params: idParamSchema, body: bodySchema }
   }, async (req, reply) => {
     const { id } = req.params
-    const { siteName, usernameHint = '', encryptedPayload, iv } = req.body
+    const { siteName, usernameHint = '', url, encryptedPayload, iv } = req.body
 
     const existing = await prisma.credential.findUnique({ where: { id } })
     if (!existing) return reply.status(404).send({ error: 'Credential not found' })
 
     const updated = await prisma.credential.update({
       where: { id },
-      data: { siteName, usernameHint, encryptedPayload, iv }
+      data: { siteName, usernameHint, url, encryptedPayload, iv }
     })
     return reply.send(updated)
   })

@@ -11,8 +11,9 @@ model Credential {
   id               String   @id @default(uuid())
   siteName         String   @db.VarChar(255)
   usernameHint     String   @default("") @db.VarChar(255)
-  encryptedPayload String   // AES-256-GCM ciphertext, base64-encoded
-  iv               String   @db.VarChar(64) // 96-bit nonce, base64-encoded
+  url              String?  @db.VarChar(2048) // plaintext website URL (nullable)
+  encryptedPayload String   // AES-256-GCM ciphertext of JSON {password, notes?}, base64-encoded
+  iv               String   @db.VarChar(64)   // 96-bit nonce, base64-encoded
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 }
