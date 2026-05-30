@@ -28,8 +28,9 @@ model Credential {
   iv               String   @db.VarChar(64)   // 96-bit nonce, base64-encoded
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
+  deletedAt        DateTime? // soft delete — null = active; set = trashed (hidden, recoverable)
 
-  @@index([userId])
+  @@index([userId, deletedAt])
 }
 
 // Per-user vault config (replaces the previous singleton with id='vault').

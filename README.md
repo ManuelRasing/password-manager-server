@@ -107,8 +107,33 @@ Server starts at `http://localhost:3000`.
 | `GET` | `/credentials` | List all credentials (returns encrypted blobs) |
 | `POST` | `/credentials` | Create a new credential |
 | `PUT` | `/credentials/:id` | Update an existing credential |
-| `DELETE` | `/credentials/:id` | Delete a credential |
+| `DELETE` | `/credentials/:id` | Soft-delete a credential (sets `deletedAt`; recoverable) |
 | `POST` | `/backup/google-drive` | Export all credentials to Google Drive |
+
+### Admin (requires `X-Admin-Key` header)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/admin/users` | Create a user (returns API key once) |
+| `GET` | `/admin/users` | List all users (no keys) |
+| `DELETE` | `/admin/users/:id` | Delete a user + cascade their data |
+| `POST` | `/admin/credentials/cleanup` | Hard-delete soft-deleted credentials older than 30 days |
+
+#### Restoring a soft-deleted credential
+
+There is no in-app restore (by design — keeps the UI simple). To recover a
+credential a user deleted by mistake, run this in the Neon SQL console:
+
+```sql
+UPDATE "Credential" SET "deletedAt" = NULL WHERE id = '<credential-id>';
+```
+
+Find the id by listing the user's trashed rows:
+
+```sql
+SELECT id, "siteName", "deletedAt" FROM "Credential"
+WHERE "userId" = '<user-id>' AND "deletedAt" IS NOT NULL;
+```
 
 ### Request body (`POST` / `PUT`)
 
@@ -275,6 +300,13 @@ server/
 - `PUT /vault-config` — upserts the vault config; called on first setup and on master-password rotation
 - Both endpoints are behind HMAC auth
 - `masterSalt` is the PBKDF2 salt (not secret); `encryptedVaultKey` is `AES-256-GCM(masterKey, vaultKey)` — useless without the master password
+
+### Phase 12 — Soft Delete
+- `Credential.deletedAt DateTime?` added; index changed to `@@index([userId, deletedAt])`
+- `DELETE /credentials/:id` now sets `deletedAt` instead of hard-deleting (still returns 204); the row stays in the DB and is recoverable
+- All reads (`GET /credentials`, `PUT`/`DELETE` ownership lookups, backup export) filter `deletedAt: null` — trashed rows are invisible everywhere
+- New `POST /admin/credentials/cleanup` permanently removes rows soft-deleted >30 days ago; returns `{ deleted, cutoff }`
+- Restore is manual via Neon SQL (`UPDATE "Credential" SET "deletedAt" = NULL WHERE id = '…'`) — see Admin API section
 
 ### Phase 10 — Multi-User
 - **`User` model** added (`id`, `username`, `apiKey`, `createdAt`) — each user has fully independent credentials and vault config

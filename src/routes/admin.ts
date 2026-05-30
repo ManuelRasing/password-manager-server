@@ -90,4 +90,14 @@ export async function adminRoutes(app: FastifyInstance) {
 
     return reply.status(204).send()
   })
+
+  // POST /admin/credentials/cleanup — permanently remove soft-deleted credentials
+  // older than 30 days. Run manually; no cron needed at our scale.
+  app.post('/credentials/cleanup', async (_req, reply) => {
+    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) // 30 days ago
+    const result = await prisma.credential.deleteMany({
+      where: { deletedAt: { lt: cutoff } }
+    })
+    return reply.send({ deleted: result.count, cutoff: cutoff.toISOString() })
+  })
 }

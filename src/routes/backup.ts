@@ -12,7 +12,7 @@ export async function backupRoutes(app: FastifyInstance) {
     const username = user?.username ?? req.userId
 
     const credentials = await prisma.credential.findMany({
-      where:   { userId: req.userId },
+      where:   { userId: req.userId, deletedAt: null },
       orderBy: { updatedAt: 'desc' },
       select: {
         id: true,
