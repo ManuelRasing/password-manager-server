@@ -90,6 +90,25 @@ npm run dev
 
 Server starts at `http://localhost:3000`.
 
+### 5. Run the tests
+
+Tests run against an **isolated `test` Postgres schema** in the same Neon database —
+production data in the `public` schema is never touched.
+
+```bash
+# One-time: generate .env.test (DATABASE_URL with &schema=test) and push the schema
+#   (see test/helpers.ts; .env.test is gitignored)
+npm run db:push:test
+
+# Run the suite
+npm test          # vitest run
+npm run test:watch
+```
+
+`.env.test` holds `DATABASE_URL` (schema=test), a dummy `API_KEY`, and an
+`ADMIN_KEY` used by the admin tests. Coverage: HMAC auth, per-user scoping
+(cross-user access → 404), soft delete, vault config isolation, and the admin API.
+
 ---
 
 ## API Reference
@@ -300,6 +319,13 @@ server/
 - `PUT /vault-config` — upserts the vault config; called on first setup and on master-password rotation
 - Both endpoints are behind HMAC auth
 - `masterSalt` is the PBKDF2 salt (not secret); `encryptedVaultKey` is `AES-256-GCM(masterKey, vaultKey)` — useless without the master password
+
+### Phase 14 — Automated Tests (critical paths)
+- **Vitest** added; app factory extracted to `src/app.ts` (`buildApp({ rateLimit, logger })`) so tests can use `app.inject()` without binding a port; `index.ts` keeps the bootstrap + `listen`
+- Tests run against an isolated `test` Postgres schema (same Neon DB, `&schema=test`) — never touches `public`. `.env.test` is gitignored
+- `test/helpers.ts`: `getTestApp`, `createUser`, `signedHeaders` (mirrors the mobile HMAC signing), `adminHeaders`, `resetDb`
+- 24 tests across auth / credentials / vault-config / admin covering: valid+invalid signatures, missing/expired headers, no account enumeration, per-user scoping (cross-user → 404), soft-delete behaviour, vault isolation, admin key checks, user-delete cascade, cleanup endpoint
+- New scripts: `npm test`, `npm run test:watch`, `npm run db:push:test`
 
 ### Phase 12 — Soft Delete
 - `Credential.deletedAt DateTime?` added; index changed to `@@index([userId, deletedAt])`

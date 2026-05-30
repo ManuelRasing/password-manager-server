@@ -10,6 +10,9 @@
     "db:push": "prisma db push",
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",
+    "db:push:test": "DATABASE_URL=$(node -e \"require('dotenv').config({path:'.env.test'});process.stdout.write(process.env.DATABASE_URL)\") prisma db push --skip-generate",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "auth:google": "tsx scripts/get-refresh-token.ts"
   },
   "dependencies": {
@@ -24,6 +27,7 @@
     "@types/node": "^22.10.0",
     "prisma": "^6.2.0",
     "tsx": "^4.19.2",
-    "typescript": "^5.7.2"
+    "typescript": "^5.7.2",
+    "vitest": "^3.2.4"
   }
 }
