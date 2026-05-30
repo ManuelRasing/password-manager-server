@@ -23,20 +23,24 @@ const idParamSchema = {
   }
 }
 
+// Fields returned to the client — kept in one place to stay in sync across routes.
+const credentialSelect = {
+  id: true,
+  siteName: true,
+  usernameHint: true,
+  url: true,
+  encryptedPayload: true,
+  iv: true,
+  createdAt: true,
+  updatedAt: true
+} as const
+
 export async function credentialRoutes(app: FastifyInstance) {
-  app.get('/', async (_req, reply) => {
+  app.get('/', async (req, reply) => {
     const credentials = await prisma.credential.findMany({
+      where: { userId: req.userId },
       orderBy: { updatedAt: 'desc' },
-      select: {
-        id: true,
-        siteName: true,
-        usernameHint: true,
-        url: true,
-        encryptedPayload: true,
-        iv: true,
-        createdAt: true,
-        updatedAt: true
-      }
+      select: credentialSelect
     })
     return reply.send(credentials)
   })
@@ -46,7 +50,8 @@ export async function credentialRoutes(app: FastifyInstance) {
   }, async (req, reply) => {
     const { siteName, usernameHint = '', url, encryptedPayload, iv } = req.body
     const credential = await prisma.credential.create({
-      data: { siteName, usernameHint, url, encryptedPayload, iv }
+      data: { userId: req.userId, siteName, usernameHint, url, encryptedPayload, iv },
+      select: credentialSelect
     })
     return reply.status(201).send(credential)
   })
@@ -57,12 +62,16 @@ export async function credentialRoutes(app: FastifyInstance) {
     const { id } = req.params
     const { siteName, usernameHint = '', url, encryptedPayload, iv } = req.body
 
-    const existing = await prisma.credential.findUnique({ where: { id } })
+    // Scoped lookup — a wrong owner gets a 404 (not 403, to avoid leaking existence).
+    const existing = await prisma.credential.findFirst({
+      where: { id, userId: req.userId }
+    })
     if (!existing) return reply.status(404).send({ error: 'Credential not found' })
 
     const updated = await prisma.credential.update({
       where: { id },
-      data: { siteName, usernameHint, url, encryptedPayload, iv }
+      data: { siteName, usernameHint, url, encryptedPayload, iv },
+      select: credentialSelect
     })
     return reply.send(updated)
   })
@@ -72,7 +81,9 @@ export async function credentialRoutes(app: FastifyInstance) {
   }, async (req, reply) => {
     const { id } = req.params
 
-    const existing = await prisma.credential.findUnique({ where: { id } })
+    const existing = await prisma.credential.findFirst({
+      where: { id, userId: req.userId }
+    })
     if (!existing) return reply.status(404).send({ error: 'Credential not found' })
 
     await prisma.credential.delete({ where: { id } })

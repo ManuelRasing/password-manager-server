@@ -2,9 +2,6 @@ import { FastifyInstance } from 'fastify'
 import prisma from '../lib/prisma'
 import { VaultConfigBody } from '../types'
 
-// There is always exactly one vault config per deployment.
-const SINGLETON_ID = 'vault'
-
 const bodySchema = {
   type: 'object',
   required: ['masterSalt', 'encryptedVaultKey', 'vaultKeyIv'],
@@ -16,39 +13,34 @@ const bodySchema = {
   additionalProperties: false
 }
 
+const vaultConfigSelect = {
+  masterSalt: true,
+  encryptedVaultKey: true,
+  vaultKeyIv: true
+} as const
+
 export async function vaultConfigRoutes(app: FastifyInstance) {
-  // GET /vault-config
-  // Returns the stored vault config, or 404 if the vault has never been set up.
-  app.get('/', async (_req, reply) => {
+  // GET /vault-config — returns this user's vault config, or 404 if not set up.
+  app.get('/', async (req, reply) => {
     const config = await prisma.vaultConfig.findUnique({
-      where: { id: SINGLETON_ID }
+      where:  { userId: req.userId },
+      select: vaultConfigSelect
     })
-    if (!config) {
-      return reply.status(404).send({ error: 'Vault not configured' })
-    }
-    return reply.send({
-      masterSalt:        config.masterSalt,
-      encryptedVaultKey: config.encryptedVaultKey,
-      vaultKeyIv:        config.vaultKeyIv
-    })
+    if (!config) return reply.status(404).send({ error: 'Vault not configured' })
+    return reply.send(config)
   })
 
-  // PUT /vault-config
-  // Creates or replaces the vault config (upsert).
-  // Called on first setup and whenever the master password is changed.
+  // PUT /vault-config — upserts this user's vault config (first setup or rotation).
   app.put<{ Body: VaultConfigBody }>('/', {
     schema: { body: bodySchema }
   }, async (req, reply) => {
     const { masterSalt, encryptedVaultKey, vaultKeyIv } = req.body
     const config = await prisma.vaultConfig.upsert({
-      where:  { id: SINGLETON_ID },
+      where:  { userId: req.userId },
       update: { masterSalt, encryptedVaultKey, vaultKeyIv },
-      create: { id: SINGLETON_ID, masterSalt, encryptedVaultKey, vaultKeyIv }
+      create: { userId: req.userId, masterSalt, encryptedVaultKey, vaultKeyIv },
+      select: vaultConfigSelect
     })
-    return reply.send({
-      masterSalt:        config.masterSalt,
-      encryptedVaultKey: config.encryptedVaultKey,
-      vaultKeyIv:        config.vaultKeyIv
-    })
+    return reply.send(config)
   })
 }

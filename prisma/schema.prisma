@@ -7,22 +7,36 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// Each user has an independent vault — separate master password, vault key, credentials.
+model User {
+  id          String   @id @default(uuid())
+  username    String   @unique @db.VarChar(64)
+  apiKey      String   // raw key — required for HMAC-SHA256 verification
+  createdAt   DateTime @default(now())
+}
+
 model Credential {
   id               String   @id @default(uuid())
+  // @default("migrating") lets db:push add this column to existing rows.
+  // The startup bootstrap immediately reassigns all "migrating" rows to the admin user.
+  // FK relation to User is enforced at the application level (auth middleware).
+  userId           String   @default("migrating")
   siteName         String   @db.VarChar(255)
   usernameHint     String   @default("") @db.VarChar(255)
-  url              String?  @db.VarChar(2048) // plaintext website URL (nullable)
+  url              String?  @db.VarChar(2048)
   encryptedPayload String   // AES-256-GCM ciphertext of JSON {password, notes?}, base64-encoded
   iv               String   @db.VarChar(64)   // 96-bit nonce, base64-encoded
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
+
+  @@index([userId])
 }
 
-// Singleton row (id = 'vault') — stores the wrapped vault key.
-// masterSalt + encryptedVaultKey + vaultKeyIv are all safe to store
-// server-side: the vault key is useless without the master password.
+// Per-user vault config (replaces the previous singleton with id='vault').
+// @unique on userId enforces one vault config per user.
 model VaultConfig {
-  id                String   @id // always 'vault'
+  id                String   @id @default(uuid())
+  userId            String   @unique @default("migrating")
   masterSalt        String   // PBKDF2 salt, base64 (not secret)
   encryptedVaultKey String   // AES-256-GCM(masterKey, vaultKey), base64
   vaultKeyIv        String   // GCM nonce for the above, base64

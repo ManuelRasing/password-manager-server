@@ -276,6 +276,16 @@ server/
 - Both endpoints are behind HMAC auth
 - `masterSalt` is the PBKDF2 salt (not secret); `encryptedVaultKey` is `AES-256-GCM(masterKey, vaultKey)` — useless without the master password
 
+### Phase 10 — Multi-User
+- **`User` model** added (`id`, `username`, `apiKey`, `createdAt`) — each user has fully independent credentials and vault config
+- **`Credential` + `VaultConfig`**: added `userId String @default("migrating")` for safe migration of existing rows; `VaultConfig.userId` is `@unique` (one vault config per user). FK relations enforced at application level (auth middleware) — no DB-level FK because the staged migration would have failed
+- **`auth.ts`** rewritten: requires `X-Username` header; looks up the user's `apiKey` from the DB and uses it as the HMAC secret; attaches `request.userId` for downstream handlers. Same 401 message for unknown username and bad signature (no enumeration)
+- **All credential / vault-config routes**: now scoped by `userId` in every WHERE / data clause; ownership-failures return 404 (no leak)
+- **`backup.ts`**: filename now includes the username (`password-manager-backup-{username}-{ts}.json`); export contains only the requesting user's credentials
+- **`/admin/*` routes** (new): secured by `ADMIN_KEY` env var (separate from per-user API keys, constant-time comparison). Endpoints: `POST /admin/users`, `GET /admin/users`, `DELETE /admin/users/:id`. Generated API key returned ONCE on creation. User delete cascades credentials + vault-config inside a transaction
+- **Startup bootstrap**: on first boot after schema push, if `User` table is empty and `API_KEY` is set, creates `admin` user owning the existing data; logs the migration count
+- New env var: `ADMIN_KEY` (required for `/admin/*` access; if unset the admin API returns 503)
+
 ### Phase 9 — Notes + URL Fields
 - `Credential` schema: added `url String? @db.VarChar(2048)` (plaintext, nullable)
 - All credential routes updated: `url` included in body schema, select projections, create/update data
