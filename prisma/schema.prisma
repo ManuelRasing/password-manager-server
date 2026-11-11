@@ -13,6 +13,33 @@ model User {
   username    String   @unique @db.VarChar(64)
   apiKey      String   // raw key — required for HMAC-SHA256 verification
   createdAt   DateTime @default(now())
+  deviceEnrollments DeviceEnrollment[]
+  deviceAccess      DeviceAccess[]
+}
+
+model DeviceEnrollment {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash   String   @unique @db.VarChar(64)
+  deviceName String   @db.VarChar(64)
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+}
+
+model DeviceAccess {
+  id         String   @id @default(uuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash  String   @unique @db.VarChar(64)
+  deviceName String   @db.VarChar(64)
+  revokedAt  DateTime?
+  createdAt  DateTime @default(now())
+
+  @@index([userId, revokedAt])
 }
 
 model Credential {
@@ -21,10 +48,11 @@ model Credential {
   // The startup bootstrap immediately reassigns all "migrating" rows to the admin user.
   // FK relation to User is enforced at the application level (auth middleware).
   userId           String   @default("migrating")
-  siteName         String   @db.VarChar(255)
-  usernameHint     String   @default("") @db.VarChar(255)
+  formatVersion    Int      @default(1) // v2 encrypts all login fields
+  siteName         String?  @db.VarChar(255) // legacy only
+  usernameHint     String?  @db.VarChar(255) // legacy only
   url              String?  @db.VarChar(2048)
-  encryptedPayload String   // AES-256-GCM ciphertext of JSON {password, notes?}, base64-encoded
+  encryptedPayload String   // AES-256-GCM ciphertext, base64-encoded
   iv               String   @db.VarChar(64)   // 96-bit nonce, base64-encoded
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
@@ -41,6 +69,8 @@ model VaultConfig {
   masterSalt        String   // PBKDF2 salt, base64 (not secret)
   encryptedVaultKey String   // AES-256-GCM(masterKey, vaultKey), base64
   vaultKeyIv        String   // GCM nonce for the above, base64
+  revision          Int      @default(1)
+  minCredentialFormat Int    @default(1)
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 }

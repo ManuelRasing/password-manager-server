@@ -29,77 +29,81 @@ describe('vault-config (per-user)', () => {
     bob = await createUser('bob')
   })
 
-  it('GET returns 404 when not configured', async () => {
-    const res = await app.inject({
-      method: 'GET',
-      url: '/vault-config',
-      headers: signedHeaders(alice.apiKey, 'alice', 'GET', '/vault-config'),
-    })
-    expect(res.statusCode).toBe(404)
-  })
-
-  it('PUT creates, GET returns it', async () => {
-    const payload = vaultBody()
-    const put = await app.inject({
-      method: 'PUT',
-      url: '/vault-config',
-      headers: signedHeaders(alice.apiKey, 'alice', 'PUT', '/vault-config', payload),
+  function inject(
+    user: typeof alice,
+    method: 'GET' | 'POST' | 'PUT',
+    payload?: ReturnType<typeof vaultBody> & { revision?: number },
+  ) {
+    const url = '/vault-config'
+    return app.inject({
+      method,
+      url,
+      headers: signedHeaders(user.apiKey, user.username, method, url, payload),
       payload,
     })
-    expect(put.statusCode).toBe(200)
+  }
 
-    const get = await app.inject({
-      method: 'GET',
-      url: '/vault-config',
-      headers: signedHeaders(alice.apiKey, 'alice', 'GET', '/vault-config'),
-    })
+  it('returns 404 when no config exists', async () => {
+    expect((await inject(alice, 'GET')).statusCode).toBe(404)
+  })
+
+  it('returns existing config fields and their initial revision', async () => {
+    const payload = vaultBody()
+    await prisma.vaultConfig.create({ data: { userId: alice.id, ...payload } })
+    const get = await inject(alice, 'GET')
     expect(get.statusCode).toBe(200)
-    expect(get.json().masterSalt).toBe('salt-b64')
+    expect(get.json()).toEqual({ ...payload, revision: 1 })
   })
 
-  it('PUT again overwrites (rotation)', async () => {
-    const first = vaultBody('salt-1')
-    await app.inject({
-      method: 'PUT',
-      url: '/vault-config',
-      headers: signedHeaders(alice.apiKey, 'alice', 'PUT', '/vault-config', first),
-      payload: first,
-    })
-    const second = vaultBody('salt-2')
-    await app.inject({
-      method: 'PUT',
-      url: '/vault-config',
-      headers: signedHeaders(alice.apiKey, 'alice', 'PUT', '/vault-config', second),
-      payload: second,
-    })
-
-    const get = await app.inject({
-      method: 'GET',
-      url: '/vault-config',
-      headers: signedHeaders(alice.apiKey, 'alice', 'GET', '/vault-config'),
-    })
-    expect(get.json().masterSalt).toBe('salt-2')
-
-    // Exactly one row for this user
-    const count = await prisma.vaultConfig.count({ where: { userId: alice.id } })
-    expect(count).toBe(1)
+  it('accepts one concurrent setup and preserves its config', async () => {
+    const setups = await Promise.all([
+      inject(alice, 'POST', vaultBody('salt-1')),
+      inject(alice, 'POST', vaultBody('salt-2')),
+    ])
+    expect(setups.map(response => response.statusCode).sort()).toEqual([201, 409])
+    const created = setups.find(response => response.statusCode === 201)!
+    expect(created.json().revision).toBe(1)
+    expect((await inject(alice, 'GET')).json()).toEqual(created.json())
+    expect(await prisma.vaultConfig.count({ where: { userId: alice.id } })).toBe(1)
   })
 
-  it('one user’s PUT does not affect another user’s vault', async () => {
-    const aliceBody = vaultBody('alice-salt')
-    await app.inject({
-      method: 'PUT',
-      url: '/vault-config',
-      headers: signedHeaders(alice.apiKey, 'alice', 'PUT', '/vault-config', aliceBody),
-      payload: aliceBody,
-    })
+  it('rejects a rotation when no config exists', async () => {
+    const update = await inject(alice, 'PUT', { ...vaultBody(), revision: 1 })
+    expect(update.statusCode).toBe(409)
+    expect((await inject(alice, 'GET')).statusCode).toBe(404)
+  })
 
-    // Bob has no vault yet
-    const bobGet = await app.inject({
-      method: 'GET',
-      url: '/vault-config',
-      headers: signedHeaders(bob.apiKey, 'bob', 'GET', '/vault-config'),
-    })
-    expect(bobGet.statusCode).toBe(404)
+  it('requires a revision and rejects a stale rotation', async () => {
+    await inject(alice, 'POST', vaultBody('initial-salt'))
+    expect((await inject(alice, 'PUT', vaultBody())).statusCode).toBe(400)
+
+    const update = await inject(alice, 'PUT', { ...vaultBody('new-salt'), revision: 1 })
+    expect(update.statusCode).toBe(200)
+    expect(update.json()).toEqual({ ...vaultBody('new-salt'), revision: 2 })
+    const stale = await inject(alice, 'PUT', { ...vaultBody('stale-salt'), revision: 1 })
+    expect(stale.statusCode).toBe(409)
+    expect((await inject(alice, 'GET')).json()).toEqual(update.json())
+  })
+
+  it('accepts one concurrent rotation from the same revision', async () => {
+    await inject(alice, 'POST', vaultBody('initial-salt'))
+    const rotations = await Promise.all([
+      inject(alice, 'PUT', { ...vaultBody('salt-1'), revision: 1 }),
+      inject(alice, 'PUT', { ...vaultBody('salt-2'), revision: 1 }),
+    ])
+    expect(rotations.map(response => response.statusCode).sort()).toEqual([200, 409])
+    const accepted = rotations.find(response => response.statusCode === 200)!
+    expect(accepted.json().revision).toBe(2)
+    expect((await inject(alice, 'GET')).json()).toEqual(accepted.json())
+  })
+
+  it('isolates setup and rotations between users', async () => {
+    await inject(alice, 'POST', vaultBody('alice-salt'))
+    expect((await inject(bob, 'GET')).statusCode).toBe(404)
+    await inject(bob, 'POST', vaultBody('bob-salt'))
+
+    const update = await inject(alice, 'PUT', { ...vaultBody('alice-new-salt'), revision: 1 })
+    expect(update.statusCode).toBe(200)
+    expect((await inject(bob, 'GET')).json()).toEqual({ ...vaultBody('bob-salt'), revision: 1 })
   })
 })

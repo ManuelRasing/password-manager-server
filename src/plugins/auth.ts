@@ -1,11 +1,32 @@
 import { FastifyPluginAsync } from 'fastify'
 import fp from 'fastify-plugin'
+import { createHash } from 'node:crypto'
 import prisma from '../lib/prisma'
 import { computeHmac, hashBody, isTimestampValid, safeEqual } from '../lib/hmac'
 import '../types' // for FastifyRequest.userId augmentation
 
 const auth: FastifyPluginAsync = async (app) => {
   app.addHook('preHandler', async (request, reply) => {
+    const authorization = request.headers.authorization
+    if (authorization !== undefined) {
+      const token = /^Bearer (pm_device_[A-Za-z0-9_-]{43})$/.exec(authorization)?.[1]
+      if (!token || request.headers['x-username'] || request.headers['x-signature'] || request.headers['x-timestamp']) {
+        return reply.status(401).send({ error: 'Invalid device access' })
+      }
+      const device = await prisma.deviceAccess.findUnique({
+        where: { tokenHash: createHash('sha256').update(token).digest('hex') },
+        select: { userId: true, revokedAt: true }
+      })
+      if (!device || device.revokedAt !== null) {
+        return reply.status(401).send({ error: 'Invalid device access' })
+      }
+      if (request.method !== 'GET' || !request.routeOptions.config.allowDeviceRead) {
+        return reply.status(403).send({ error: 'This device has read-only vault access' })
+      }
+      request.userId = device.userId
+      return
+    }
+
     const username  = request.headers['x-username']  as string | undefined
     const timestamp = request.headers['x-timestamp'] as string | undefined
     const signature = request.headers['x-signature'] as string | undefined

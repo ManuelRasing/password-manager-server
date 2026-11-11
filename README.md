@@ -32,7 +32,7 @@ The server:
 
 ### Encrypted Payloads
 
-The server stores only **ciphertext**. Encryption and decryption happen exclusively on the mobile device using AES-256-GCM with a key derived from the master password (PBKDF2, 310 000 iterations). The server has no knowledge of plaintext passwords.
+The client encrypts credentials with AES-256-GCM using the vault key. A key derived from the master password with PBKDF2 (310 000 iterations) wraps the vault key. Version 2 encrypts the site name, username hint, URL, password, and notes together. Legacy records still carry plaintext site names, username hints, and URLs during the transition.
 
 ---
 
@@ -92,24 +92,102 @@ Server starts at `http://localhost:3000`.
 
 ### 5. Run the tests
 
-Tests run against an **isolated `test` Postgres schema** in the same Neon database —
-production data in the `public` schema is never touched.
+Create a disposable local PostgreSQL database named `password_manager_test` or
+`password_manager_test_<suffix>`. Schema push and test runs require an explicit
+`TEST_DATABASE_URL` using `127.0.0.1` or `[::1]` without connection options.
+The integration suite clears the tables in that database before each test.
 
 ```bash
-# One-time: generate .env.test (DATABASE_URL with &schema=test) and push the schema
-#   (see test/helpers.ts; .env.test is gitignored)
+export TEST_DATABASE_URL='postgresql://test_user:test_password@127.0.0.1:5432/password_manager_test'
 npm run db:push:test
-
-# Run the suite
-npm test          # vitest run
+npm test
 npm run test:watch
 ```
 
-`.env.test` holds `DATABASE_URL` (schema=test), a dummy `API_KEY`, and an
-`ADMIN_KEY` used by the admin tests. Coverage: HMAC auth, per-user scoping
-(cross-user access → 404), soft delete, vault config isolation, and the admin API.
+Coverage includes HMAC auth, per-user scoping, soft deletes, vault configuration
+conflicts, and the admin API. The test runner supplies a synthetic admin key.
 
 ---
+
+## Recovery backup
+
+The local recovery command creates a portable encrypted backup of one vault,
+including deleted records. It can store legacy and version 2 credentials
+together and open earlier recovery archives. The artifact contains the wrapped vault key
+and unlock parameters. Site names, username hints, URLs, and credential
+ciphertext are protected inside the archive. Keep the file separately from the
+database and retain the master password that was current when you created it.
+The Google Drive export lacks the unlock information needed for this workflow.
+
+Run the command from the server directory. Set `RECOVERY_DATABASE_URL` privately
+to the intended source database and choose a new backup file on a local
+filesystem. Enter the master password using a hidden prompt in Bash or Zsh.
+Backup creation can read the original deployed schema before the new revision,
+credential format, and policy columns are added.
+
+```sh
+printf 'Master password: '
+IFS= read -rs vault_recovery_password
+printf '\n'
+printf '%s\n' "$vault_recovery_password" | npm run vault:recovery -- create YOUR_USERNAME PATH_TO_BACKUP
+unset vault_recovery_password
+```
+
+To rehearse recovery, prepare an empty local PostgreSQL database named
+`password_manager_recovery` or `password_manager_recovery_<suffix>` with the
+current schema. Provision a user there with fresh API access and leave its
+vault unconfigured. Set `RECOVERY_DATABASE_URL` to that database using
+`127.0.0.1` or `[::1]` without connection options. Repeat the hidden prompt
+and use `restore` instead of `create`, passing the destination username and
+backup path. Restore verifies the artifact and unlocks its records before it
+connects to the destination. It commits the configuration and records together
+only if the destination vault is empty. After restore, connect the app to the
+rehearsal service with its fresh API access and verify that the master password
+opens the expected synthetic credentials.
+
+Run `npm run vault:recovery:test` for the synthetic archive round-trip and
+failure checks. This command uses an in-memory destination and requires no
+database or environment configuration.
+
+## Migration rehearsal
+
+The local `vault:migrate` command upgrades every legacy credential in one vault,
+including deleted entries. Run it on the owner's machine with an encrypted
+recovery backup that matches the current vault. It verifies the backup and the
+master password before preparing encrypted records locally, then commits all
+record changes and the vault's format policy together. IDs, timestamps, and
+deletion state are preserved. An interrupted transaction rolls back, and a
+completed migration can be run again safely.
+
+The default command accepts a local PostgreSQL database named
+`password_manager_migration` or `password_manager_migration_<suffix>`. Prepare
+that rehearsal database with synthetic data, save and verify its recovery
+backup, and pause edits. Set `MIGRATION_DATABASE_URL` explicitly with
+`127.0.0.1` or `[::1]` and no connection options. Supply the master password
+through the same hidden prompt used for recovery, then run
+`npm run vault:migrate -- YOUR_USERNAME PATH_TO_VERIFIED_BACKUP`.
+
+For an owner-approved live cutover, use
+`npm run vault:migrate -- --live YOUR_USERNAME PATH_TO_VERIFIED_BACKUP`.
+Set `MIGRATION_DATABASE_URL` privately and require `sslmode=require` in that
+connection URL. The only optional URL settings are `channel_binding=require`
+and `pgbouncer=true`. The live path uses the public schema.
+
+Before connecting, the live command requires `MIGRATION_CONFIRM_OWNER` to
+match the username, `MIGRATION_CONFIRM_TARGET` to match
+`hostname:port/database` with port 5432 when omitted, and
+`MIGRATION_VERIFIED_BACKUP_SHA256` to match the exact bytes of the encrypted
+backup already verified during the restore rehearsal. The owner wizard
+prepares these confirmations. Supply the master password through standard
+input. The connection URL and master password stay out of command arguments
+and logs. Run `npm run vault:migrate:guard:test` for synthetic target and
+confirmation checks.
+
+After migration, the API accepts encrypted v2 writes for this vault and rejects
+legacy writes from older clients. Verify lookup and editing in the updated
+Android app. For a rollback rehearsal, use the pre-migration backup with the
+existing recovery command to restore a separate empty local recovery vault.
+Keep that verified recovery point until cutover checks pass.
 
 ## API Reference
 
@@ -118,6 +196,7 @@ npm run test:watch
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/health` | Health check — no auth required |
+| `POST` | `/device-enrollments/redeem` | Exchange an enrollment code for read-only device access |
 
 ### Protected (requires HMAC headers)
 
@@ -127,7 +206,31 @@ npm run test:watch
 | `POST` | `/credentials` | Create a new credential |
 | `PUT` | `/credentials/:id` | Update an existing credential |
 | `DELETE` | `/credentials/:id` | Soft-delete a credential (sets `deletedAt`; recoverable) |
+| `GET` | `/vault-config` | Fetch the wrapped vault key, salt, nonce, and current revision |
+| `POST` | `/vault-config` | Create the initial vault configuration. Returns 409 if it exists. |
+| `PUT` | `/vault-config` | Replace the wrapped vault key using the revision used to unlock it. Returns 409 if that revision is stale. |
 | `POST` | `/backup/google-drive` | Export all credentials to Google Drive |
+| `POST` | `/device-enrollments` | Issue a five-minute enrollment code for a named device |
+| `GET` | `/devices` | List the owner's connected desktops and revocation state |
+| `DELETE` | `/devices/:id` | Revoke one desktop's future access |
+
+Use the updated Android client for vault setup, master-password changes, and
+version 2 credentials. Migrated vaults accept encrypted version 2 writes.
+
+### Read-only device enrollment
+
+An authenticated owner sends `{ "deviceName": "My Mac" }` to
+`POST /device-enrollments` and receives `{ code, expiresAt }`. The Mac sends
+that code to `POST /device-enrollments/redeem` and receives
+`{ deviceId, deviceName, deviceToken }`. Each code expires after five minutes
+and can be redeemed once. The database stores hashes of codes and tokens.
+
+The Mac stores its token in OS secure storage and sends it in
+`Authorization: Bearer <deviceToken>` over HTTPS. This token grants only
+`GET /credentials` and `GET /vault-config` for its owner's vault. Vault writes
+and issuing enrollment codes require owner HMAC authentication. Invalid or
+revoked device access returns 401, and a write with valid read-only access
+returns 403. Public redemption uses the API's request rate limit.
 
 ### Admin (requires `X-Admin-Key` header)
 
@@ -156,30 +259,34 @@ WHERE "userId" = '<user-id>' AND "deletedAt" IS NOT NULL;
 
 ### Request body (`POST` / `PUT`)
 
+Version 2 sends the credential as a single encrypted payload.
+
 ```json
 {
-  "siteName": "GitHub",
-  "usernameHint": "me@email.com",
+  "formatVersion": 2,
   "encryptedPayload": "<base64 AES-256-GCM ciphertext>",
   "iv": "<base64 96-bit nonce>"
 }
 ```
 
-`usernameHint` is optional and stored in plaintext (it's a hint, not a secret). If you don't want it visible on the server, encrypt it into `encryptedPayload`.
+The encrypted JSON contains `siteName`, `usernameHint`, `password`, and optional `url` and `notes`. The AES-GCM associated data is the UTF-8 string `password-manager:credential:v2`.
+
+Legacy writes may still omit `formatVersion` or send `1` and supply a plaintext `siteName` with optional `usernameHint` and `url`. Saving a legacy credential with version 2 clears its plaintext fields. An attempt to update a version 2 record with a legacy payload returns 409.
 
 ### Response shape
 
 ```json
 {
   "id": "uuid",
-  "siteName": "GitHub",
-  "usernameHint": "me@email.com",
+  "formatVersion": 2,
   "encryptedPayload": "...",
   "iv": "...",
   "createdAt": "2025-01-01T00:00:00.000Z",
   "updatedAt": "2025-01-01T00:00:00.000Z"
 }
 ```
+
+Legacy responses retain their previous shape with `siteName`, `usernameHint`, and `url`.
 
 ---
 
@@ -322,7 +429,7 @@ server/
 
 ### Phase 14 — Automated Tests (critical paths)
 - **Vitest** added; app factory extracted to `src/app.ts` (`buildApp({ rateLimit, logger })`) so tests can use `app.inject()` without binding a port; `index.ts` keeps the bootstrap + `listen`
-- Tests run against an isolated `test` Postgres schema (same Neon DB, `&schema=test`) — never touches `public`. `.env.test` is gitignored
+- The current test runner requires a disposable local PostgreSQL database through `TEST_DATABASE_URL`.
 - `test/helpers.ts`: `getTestApp`, `createUser`, `signedHeaders` (mirrors the mobile HMAC signing), `adminHeaders`, `resetDb`
 - 24 tests across auth / credentials / vault-config / admin covering: valid+invalid signatures, missing/expired headers, no account enumeration, per-user scoping (cross-user → 404), soft-delete behaviour, vault isolation, admin key checks, user-delete cascade, cleanup endpoint
 - New scripts: `npm test`, `npm run test:watch`, `npm run db:push:test`

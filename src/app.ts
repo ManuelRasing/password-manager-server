@@ -5,6 +5,8 @@ import { credentialRoutes } from './routes/credentials'
 import { backupRoutes } from './routes/backup'
 import { vaultConfigRoutes } from './routes/vault-config'
 import { adminRoutes } from './routes/admin'
+import { deviceEnrollmentRoutes, publicDeviceEnrollmentRoutes } from './routes/device-enrollments'
+import { deviceRoutes } from './routes/devices'
 
 export interface BuildAppOptions {
   /** Disable rate limiting (tests fire many requests in a tight loop). */
@@ -30,6 +32,8 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
             'req.headers["x-timestamp"]',
             'req.headers["x-username"]',
             'req.headers["x-admin-key"]',
+            'req.headers.authorization',
+            'req.body.code',
             'req.body.encryptedPayload',
             'req.body.iv'
           ]
@@ -43,6 +47,7 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
         max: 20,
         timeWindow: '1 minute',
         errorResponseBuilder: (_req, context) => ({
+          statusCode: context.statusCode,
           error: 'Too many requests',
           retryAfter: context.after
         })
@@ -51,6 +56,7 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
 
     // Public route — no auth required
     root.get('/health', async () => ({ status: 'ok', timestamp: new Date().toISOString() }))
+    root.register(publicDeviceEnrollmentRoutes, { prefix: '/device-enrollments' })
 
     // Admin scope — secured by ADMIN_KEY (separate from per-user API keys)
     root.register(async (adminScope) => {
@@ -63,6 +69,8 @@ export function buildApp(opts: BuildAppOptions = {}): FastifyInstance {
       protectedScope.register(credentialRoutes,  { prefix: '/credentials' })
       protectedScope.register(backupRoutes,      { prefix: '/backup' })
       protectedScope.register(vaultConfigRoutes, { prefix: '/vault-config' })
+      protectedScope.register(deviceEnrollmentRoutes, { prefix: '/device-enrollments' })
+      protectedScope.register(deviceRoutes, { prefix: '/devices' })
     })
   })
 

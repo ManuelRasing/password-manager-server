@@ -94,12 +94,13 @@ describe('admin API', () => {
       payload: credPayload,
     })
     const vaultPayload = { masterSalt: 's', encryptedVaultKey: 'k', vaultKeyIv: 'i' }
-    await app.inject({
-      method: 'PUT',
+    const vault = await app.inject({
+      method: 'POST',
       url: '/vault-config',
-      headers: signedHeaders(created.apiKey, 'dave', 'PUT', '/vault-config', vaultPayload),
+      headers: signedHeaders(created.apiKey, 'dave', 'POST', '/vault-config', vaultPayload),
       payload: vaultPayload,
     })
+    expect(vault.statusCode).toBe(201)
 
     // Delete the user
     const del = await app.inject({

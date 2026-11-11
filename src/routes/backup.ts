@@ -1,4 +1,5 @@
 import { FastifyInstance } from 'fastify'
+import { credentialSelect, serializeCredential } from '../lib/credential'
 import prisma from '../lib/prisma'
 import { uploadBackupToDrive } from '../services/gdrive'
 
@@ -14,16 +15,7 @@ export async function backupRoutes(app: FastifyInstance) {
     const credentials = await prisma.credential.findMany({
       where:   { userId: req.userId, deletedAt: null },
       orderBy: { updatedAt: 'desc' },
-      select: {
-        id: true,
-        siteName: true,
-        usernameHint: true,
-        url: true,
-        encryptedPayload: true,
-        iv: true,
-        createdAt: true,
-        updatedAt: true
-      }
+      select: credentialSelect
     })
 
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
@@ -32,9 +24,7 @@ export async function backupRoutes(app: FastifyInstance) {
     const payload = JSON.stringify({
       exportedAt: new Date().toISOString(),
       count: credentials.length,
-      // Note: siteName and usernameHint are stored as plaintext metadata.
-      // encryptedPayload values are AES-256-GCM ciphertext — unreadable without the master password.
-      credentials
+      credentials: credentials.map(serializeCredential)
     }, null, 2)
 
     const fileId = await uploadBackupToDrive(filename, payload)

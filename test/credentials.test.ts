@@ -5,8 +5,15 @@ import { createUser, getTestApp, prisma, resetDb, signedHeaders } from './helper
 const body = (siteName: string) => ({
   siteName,
   usernameHint: `${siteName}@example.com`,
+  url: 'https://login.example.com',
   encryptedPayload: 'ZmFrZS1jaXBoZXJ0ZXh0', // base64 placeholder — server is opaque
   iv: 'ZmFrZS1pdg==',
+})
+
+const encryptedBody = (marker = 7) => ({
+  formatVersion: 2,
+  encryptedPayload: Buffer.alloc(32, marker).toString('base64'),
+  iv: Buffer.alloc(12, marker).toString('base64'),
 })
 
 // POST a credential as `user`, returning the created record.
@@ -67,6 +74,142 @@ describe('credentials CRUD + per-user scoping', () => {
     const list = res.json()
     expect(list).toHaveLength(1)
     expect(list[0].siteName).toBe('GitHub')
+  })
+
+  it('stores and returns fully encrypted credentials alongside legacy credentials', async () => {
+    const legacy = await createCredential(app, alice, 'Legacy')
+    const payload = encryptedBody()
+    const create = await app.inject({
+      method: 'POST',
+      url: '/credentials',
+      headers: signedHeaders(alice.apiKey, alice.username, 'POST', '/credentials', payload),
+      payload,
+    })
+    expect(create.statusCode).toBe(201)
+    const created = create.json()
+    expect(created).toEqual({
+      ...payload,
+      id: expect.any(String),
+      createdAt: expect.any(String),
+      updatedAt: expect.any(String),
+    })
+    const row = await prisma.credential.findUnique({ where: { id: created.id } })
+    expect(row).toMatchObject({
+      ...payload,
+      siteName: null,
+      usernameHint: null,
+      url: null,
+    })
+
+    const list = await app.inject({
+      method: 'GET',
+      url: '/credentials',
+      headers: signedHeaders(alice.apiKey, alice.username, 'GET', '/credentials'),
+    })
+    expect(list.statusCode).toBe(200)
+    expect(list.json()).toEqual(expect.arrayContaining([legacy, created]))
+  })
+
+  it.each([
+    { ...encryptedBody(), siteName: 'Unexpected plaintext' },
+    { ...encryptedBody(), usernameHint: 'Unexpected plaintext' },
+    { ...encryptedBody(), url: 'https://example.com' },
+    { ...encryptedBody(), iv: 'invalid' },
+    { ...encryptedBody(), encryptedPayload: 'invalid' },
+  ])('rejects malformed encrypted records without storing them', async (payload) => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/credentials',
+      headers: signedHeaders(alice.apiKey, alice.username, 'POST', '/credentials', payload),
+      payload,
+    })
+    expect(response.statusCode).toBe(400)
+    expect(await prisma.credential.count({ where: { userId: alice.id } })).toBe(0)
+  })
+
+  it('upgrades a legacy credential without retaining metadata or permitting a downgrade', async () => {
+    const legacy = await createCredential(app, alice, 'Legacy')
+    const path = `/credentials/${legacy.id}`
+    const upgrade = encryptedBody()
+    const edit = encryptedBody(8)
+
+    for (const payload of [upgrade, edit]) {
+      const response = await app.inject({
+        method: 'PUT',
+        url: path,
+        headers: signedHeaders(alice.apiKey, alice.username, 'PUT', path, payload),
+        payload,
+      })
+      expect(response.statusCode).toBe(200)
+      expect(response.json()).toEqual({
+        ...payload,
+        id: legacy.id,
+        createdAt: legacy.createdAt,
+        updatedAt: expect.any(String),
+      })
+    }
+
+    const downgrade = body('Legacy replacement')
+    const response = await app.inject({
+      method: 'PUT',
+      url: path,
+      headers: signedHeaders(alice.apiKey, alice.username, 'PUT', path, downgrade),
+      payload: downgrade,
+    })
+    expect(response.statusCode).toBe(409)
+    const row = await prisma.credential.findUnique({ where: { id: legacy.id } })
+    expect(row).toMatchObject({ ...edit, siteName: null, usernameHint: null, url: null })
+  })
+
+  it('keeps encrypted records scoped to their owner and preserves soft deletion', async () => {
+    const payload = encryptedBody()
+    const create = await app.inject({
+      method: 'POST',
+      url: '/credentials',
+      headers: signedHeaders(alice.apiKey, alice.username, 'POST', '/credentials', payload),
+      payload,
+    })
+    expect(create.statusCode).toBe(201)
+    const created = create.json()
+    const path = `/credentials/${created.id}`
+
+    for (const method of ['PUT', 'DELETE'] as const) {
+      const body = method === 'PUT' ? encryptedBody(8) : undefined
+      const response = await app.inject({
+        method,
+        url: path,
+        headers: signedHeaders(bob.apiKey, bob.username, method, path, body),
+        ...(body ? { payload: body } : {}),
+      })
+      expect(response.statusCode).toBe(404)
+    }
+
+    const deletion = await app.inject({
+      method: 'DELETE',
+      url: path,
+      headers: signedHeaders(alice.apiKey, alice.username, 'DELETE', path),
+    })
+    expect(deletion.statusCode).toBe(204)
+    expect(await prisma.credential.findUnique({ where: { id: created.id } })).toMatchObject({
+      ...payload,
+      deletedAt: expect.any(Date),
+    })
+
+    const update = encryptedBody(9)
+    const edit = await app.inject({
+      method: 'PUT',
+      url: path,
+      headers: signedHeaders(alice.apiKey, alice.username, 'PUT', path, update),
+      payload: update,
+    })
+    expect(edit.statusCode).toBe(404)
+    const list = await app.inject({
+      method: 'GET',
+      url: '/credentials',
+      headers: signedHeaders(alice.apiKey, alice.username, 'GET', '/credentials'),
+    })
+    expect(list.statusCode).toBe(200)
+    expect(list.json()).toEqual([])
   })
 
   it('User B cannot UPDATE User A’s credential (404, not 403)', async () => {

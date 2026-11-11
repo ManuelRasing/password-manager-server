@@ -10,10 +10,14 @@
     "db:push": "prisma db push",
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",
-    "db:push:test": "DATABASE_URL=$(node -e \"require('dotenv').config({path:'.env.test'});process.stdout.write(process.env.DATABASE_URL)\") prisma db push --skip-generate",
+    "db:push:test": "node --import tsx scripts/push-test-schema.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "auth:google": "tsx scripts/get-refresh-token.ts"
+    "auth:google": "tsx scripts/get-refresh-token.ts",
+    "vault:recovery": "node --import tsx scripts/recover-vault.ts",
+    "vault:migrate": "node --import tsx scripts/migrate-vault.ts",
+    "vault:migrate:guard:test": "node --import tsx --test scripts/migration-target.test.ts",
+    "vault:recovery:test": "node --import tsx --test scripts/recovery-backup.test.ts"
   },
   "dependencies": {
     "@fastify/rate-limit": "^10.0.0",

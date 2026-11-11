@@ -3,9 +3,17 @@ import type { FastifyInstance } from 'fastify'
 import { buildApp } from '../src/app'
 import prisma from '../src/lib/prisma'
 import { computeHmac, hashBody } from '../src/lib/hmac'
+import { requireTestDatabaseUrl } from '../scripts/test-database'
+
+function assertTestDatabase() {
+  if (process.env.DATABASE_URL !== requireTestDatabaseUrl(process.env.TEST_DATABASE_URL)) {
+    throw new Error('Integration tests require DATABASE_URL to match TEST_DATABASE_URL')
+  }
+}
 
 /** Wipes all three tables. No DB-level FKs (relations are app-level), so order is free. */
 export async function resetDb() {
+  assertTestDatabase()
   await prisma.$transaction([
     prisma.credential.deleteMany(),
     prisma.vaultConfig.deleteMany(),
@@ -15,6 +23,7 @@ export async function resetDb() {
 
 /** Creates a user with a fresh random API key and returns it (key included). */
 export async function createUser(username: string) {
+  assertTestDatabase()
   const apiKey = crypto.randomBytes(32).toString('hex')
   const user = await prisma.user.create({ data: { username, apiKey } })
   return { ...user, apiKey }
@@ -48,6 +57,7 @@ export function signedHeaders(
 
 /** Builds the app with rate limiting + logging off (tests fire many requests). */
 export function getTestApp(): FastifyInstance {
+  assertTestDatabase()
   return buildApp({ rateLimit: false, logger: false })
 }
 
